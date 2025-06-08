@@ -1,9 +1,10 @@
 import { APP_CONSTANTS } from './config.js';
-import { addRecipe, deleteRecipe, updateRecipe } from './recipes.js';
+import { addRecipe, updateRecipe } from './recipes.js';
 
 // UI state
 let currentSearchTerm = '';
 let currentFilterCategory = 'All';
+let editingRecipeId = null; // To store the ID of the recipe being edited
 
 /**
  * Initialize UI components and event listeners
@@ -18,26 +19,49 @@ export function initializeUI() {
  * Set up event listeners for UI elements
  */
 function setupEventListeners() {
-    const toggleButton = document.getElementById('toggleManualInputButton');
-    const cancelButton = document.getElementById('cancelButton');
-    const recipeForm = document.getElementById('recipeForm');
+    console.log("Attaching UI event listeners...");
 
-    if (toggleButton) {
-        toggleButton.addEventListener('click', () => {
-            console.log('Add New Recipe button clicked'); // Added log
-            toggleManualInput();
+    // Corrected to use IDs from index.html
+    const manualEntryBox = document.getElementById('manualEntryBox');
+    const ocrEntryBox = document.getElementById('ocrEntryBox');
+    const addManualRecipeButton = document.getElementById('addManualRecipeButton');
+    const cancelEditButton = document.getElementById('cancelEditButton');
+
+    if (manualEntryBox) {
+        manualEntryBox.addEventListener('click', () => {
+            console.log('Manual entry box clicked!');
+            document.getElementById('manualInputSection').classList.remove('hidden');
+            document.getElementById('ocrInputSection').classList.add('hidden');
         });
     }
 
-    if (cancelButton) {
-        cancelButton.addEventListener('click', () => {
-            toggleManualInput();
-            clearForm();
+    if (ocrEntryBox) {
+        ocrEntryBox.addEventListener('click', () => {
+            console.log('OCR entry box clicked!');
+            document.getElementById('ocrInputSection').classList.remove('hidden');
+            document.getElementById('manualInputSection').classList.add('hidden');
         });
     }
 
-    if (recipeForm) {
-        recipeForm.addEventListener('submit', handleRecipeSubmit);
+    if (addManualRecipeButton) {
+        addManualRecipeButton.addEventListener('click', handleRecipeSubmit);
+    }
+    
+    const addFileRecipeButton = document.getElementById('addFileRecipeButton');
+    if (addFileRecipeButton) {
+        addFileRecipeButton.addEventListener('click', handleFileUpload);
+    }
+
+    // Add listener for the "Save Changes" button in the edit modal
+    const saveChangesButton = document.getElementById('saveChangesButton');
+    if (saveChangesButton) {
+        saveChangesButton.addEventListener('click', handleUpdateRecipe);
+    }
+
+    if (cancelEditButton) {
+        cancelEditButton.addEventListener('click', () => {
+             document.getElementById('edit-recipe-modal').classList.add('hidden');
+        });
     }
 }
 
@@ -124,35 +148,264 @@ function validateInput(input) {
 async function handleRecipeSubmit(e) {
     e.preventDefault();
 
-    const form = e.target;
-    const formData = new FormData(form);
-    const recipeData = Object.fromEntries(formData.entries());
+    // Manually gather data from input fields
+    const recipeData = {
+        itemName: document.getElementById('itemName').value,
+        categories: document.getElementById('categories').value,
+        description: document.getElementById('description').value,
+        ingredients: document.getElementById('ingredients').value,
+        instructions: document.getElementById('instructions').value,
+        notes: document.getElementById('notes').value || ''
+    };
 
-    // Validate form before submitting
-    let isFormValid = true;
-    const inputs = form.querySelectorAll('input[required], textarea[required]');
-    inputs.forEach(input => {
-        if (!validateInput(input)) {
-            isFormValid = false;
-        }
-    });
+    // Process raw text into arrays, filtering out empty lines/tags
+    recipeData.categories = recipeData.categories.split(',').map(s => s.trim()).filter(Boolean);
+    recipeData.ingredients = recipeData.ingredients.split('\n').map(s => s.trim()).filter(Boolean);
+    recipeData.instructions = recipeData.instructions.split('\n').map(s => s.trim()).filter(Boolean);
 
-    if (!isFormValid) {
-        displayErrorMessage('Please fill in all required fields correctly.');
+    // Basic validation
+    if (!recipeData.itemName || recipeData.ingredients.length === 0 || recipeData.instructions.length === 0) {
+        displayErrorMessage('Recipe Name, Ingredients, and Instructions are required.');
         return;
     }
 
     try {
         showLoading('Saving recipe...');
         await addRecipe(recipeData);
-        displaySuccessMessage('Recipe added successfully!');
-        clearForm();
-        toggleManualInput();
+        
+        // Clear the form fields manually
+        document.getElementById('itemName').value = '';
+        document.getElementById('categories').value = '';
+        document.getElementById('description').value = '';
+        document.getElementById('ingredients').value = '';
+        document.getElementById('instructions').value = '';
+        document.getElementById('notes').value = '';
+
+        // Hide the form
+        document.getElementById('manualInputSection').classList.add('hidden');
+
     } catch (error) {
+        // Log the error for debugging, even though recipes.js already displays a message.
         console.error('Error saving recipe:', error);
-        displayErrorMessage('Failed to save recipe. Please try again.');
     } finally {
         hideLoading();
+    }
+}
+
+/**
+ * Handles the file upload for OCR or text processing.
+ */
+async function handleFileUpload() {
+    const fileInput = document.getElementById('fileInput');
+    const file = fileInput.files[0];
+
+    if (!file) {
+        displayErrorMessage('Please select a file to upload.');
+        return;
+    }
+
+    showLoading('Processing file, this may take a moment...');
+
+    try {
+        let text = '';
+        if (file.type === 'text/plain') {
+            text = await file.text();
+        } else if (file.type.startsWith('image/')) {
+            const { data } = await Tesseract.recognize(file, 'eng', {
+                logger: m => console.log(`[OCR] ${m.status}: ${Math.round(m.progress * 100)}%`)
+            });
+            text = data.text;
+        } else {
+            throw new Error('Unsupported file type. Please use .txt, .jpg, or .png.');
+        }
+
+        const parsedData = parseRecipeText(text);
+        populateManualForm(parsedData);
+
+        // Switch view to the populated manual form for review
+        document.getElementById('manualInputSection').classList.remove('hidden');
+        document.getElementById('ocrInputSection').classList.add('hidden');
+        displaySuccessMessage('Recipe data extracted! Please review and save.');
+
+    } catch (error) {
+        console.error('Error processing file:', error);
+        displayErrorMessage(error.message || 'Failed to process file.');
+    } finally {
+        hideLoading();
+        fileInput.value = ''; // Reset file input
+    }
+}
+
+/**
+ * A comprehensive parser to extract recipe parts from raw text.
+ * Enhanced to handle complex recipes with multiple sections, timing info, and nutrition facts.
+ * @param {string} text - The raw text from OCR or a .txt file.
+ * @returns {Object} An object with itemName, description, ingredients, instructions, and notes.
+ */
+function parseRecipeText(text) {
+    const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length === 0) return {};
+
+    const recipe = {
+        itemName: '',
+        description: '',
+        categories: [],
+        ingredients: [],
+        instructions: [],
+        notes: ''
+    };
+
+    let currentSection = 'header';
+    let foundTitle = false;
+    let nutritionStarted = false;
+
+    // Enhanced keywords for better section detection
+    const keywords = {
+        ingredients: ['ingredients'],
+        instructions: ['instructions', 'directions', 'method', 'preparation', 'steps'],
+        nutrition: ['nutrition facts', 'nutrition information', 'per serving', 'calories'],
+        timing: ['prep time', 'total time', 'cook time', 'servings', 'serves', 'yield']
+    };
+
+    // Ingredient sub-section patterns (like "Peanut Sauce:", "Nuoc Cham:")
+    const subSectionPattern = /^([A-Za-z\s]+):\s*$/;
+
+    // For merging broken instruction lines
+    let lastInstruction = '';
+    let inInstructions = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lowerLine = line.toLowerCase();
+        let isNewSection = false;
+
+        // Skip common OCR artifacts and formatting
+        if (line.match(/^[•\-*–—]\s*$/) || line.length < 2) continue;
+
+        // Detect main sections
+        if (keywords.instructions.some(kw => lowerLine.includes(kw))) {
+            currentSection = 'instructions';
+            inInstructions = true;
+            isNewSection = true;
+        } else if (keywords.ingredients.some(kw => lowerLine.includes(kw))) {
+            currentSection = 'ingredients';
+            inInstructions = false;
+            isNewSection = true;
+        } else if (keywords.nutrition.some(kw => lowerLine.includes(kw))) {
+            currentSection = 'nutrition';
+            nutritionStarted = true;
+            inInstructions = false;
+            isNewSection = true;
+        }
+
+        if (isNewSection) continue;
+
+        // Parse based on current section
+        if (currentSection === 'header') {
+            // First substantial line is usually the recipe title
+            if (!foundTitle && line.length > 3) {
+                recipe.itemName = line.replace(/^(recipe|dish):\s*/i, '').trim();
+                foundTitle = true;
+            } else if (foundTitle) {
+                // Collect description and metadata
+                if (keywords.timing.some(kw => lowerLine.includes(kw)) || 
+                    lowerLine.includes('by ') || 
+                    lowerLine.includes('tested by') ||
+                    lowerLine.includes('servings') ||
+                    lowerLine.includes('mins')) {
+                    recipe.description += (recipe.description ? ' ' : '') + line;
+                } else if (line.length > 10 && !line.includes(':')) {
+                    // Likely a description paragraph
+                    recipe.description += (recipe.description ? ' ' : '') + line;
+                }
+            }
+        } else if (currentSection === 'ingredients') {
+            // Handle ingredient sub-sections (like "Peanut Sauce:", "Nuoc Cham:")
+            if (subSectionPattern.test(line)) {
+                recipe.ingredients.push('');
+                recipe.ingredients.push(`--- ${line.slice(0, -1)} ---`);
+            } else {
+                // Clean up common OCR artifacts and formatting
+                let cleanedLine = line
+                    .replace(/^[-•*–—•]\s*/, '') // Remove bullet points
+                    .replace(/^\d+\.\s*/, '') // Remove numbering
+                    .replace(/^Step\s*\d+[:\s]*/i, '') // Remove step indicators
+                    .trim();
+                
+                if (cleanedLine && cleanedLine.length > 1) {
+                    recipe.ingredients.push(cleanedLine);
+                }
+            }
+        } else if (currentSection === 'instructions') {
+            // Clean up instruction formatting
+            let cleanedLine = line
+                .replace(/^[-•*–—•]\s*/, '') // Remove bullets
+                .replace(/^[0-9]+[.)]?\s*/, '') // Remove step numbers
+                .replace(/^step\s*[0-9]+[:\s]*/i, '') // Remove "Step X" indicators
+                .trim();
+
+            // Ignore artifacts and single-word lines that are not real steps
+            if (/^(stepa?|steps?)$/i.test(cleanedLine) || cleanedLine.length < 3) continue;
+            if (/^nam choc\.?$/i.test(cleanedLine)) continue;
+
+            // If the line starts with a quote or lowercase, or is a continuation, merge with previous
+            if (recipe.instructions.length > 0 &&
+                !/^([A-Z0-9]|\').*/.test(cleanedLine) &&
+                cleanedLine.length > 0) {
+                // Merge with previous instruction
+                recipe.instructions[recipe.instructions.length - 1] += ' ' + cleanedLine;
+            } else {
+                recipe.instructions.push(cleanedLine);
+            }
+        } else if (currentSection === 'nutrition' || nutritionStarted) {
+            // Append nutrition facts to notes
+            recipe.notes += (recipe.notes ? '\n' : '') + line;
+        }
+    }
+
+    // Post-processing cleanup
+    recipe.itemName = recipe.itemName || 'Untitled Recipe';
+    recipe.description = recipe.description.trim();
+    
+    // If we have nutrition info, format it better
+    if (recipe.notes && recipe.notes.includes('calorie')) {
+        recipe.notes = 'Nutrition Facts:\n' + recipe.notes;
+    }
+
+    // Extract categories from description if present
+    const categoryKeywords = ['italian', 'asian', 'vietnamese', 'chinese', 'mexican', 'indian', 'thai', 
+                             'dinner', 'lunch', 'breakfast', 'appetizer', 'dessert', 'soup', 'salad',
+                             'healthy', 'vegetarian', 'vegan', 'gluten-free', 'low-carb'];
+    
+    const descLower = recipe.description.toLowerCase();
+    categoryKeywords.forEach(keyword => {
+        if (descLower.includes(keyword)) {
+            const capitalizedKeyword = keyword.charAt(0).toUpperCase() + keyword.slice(1);
+            if (!recipe.categories.includes(capitalizedKeyword)) {
+                recipe.categories.push(capitalizedKeyword);
+            }
+        }
+    });
+
+    console.log('Parsed recipe data:', recipe);
+    return recipe;
+}
+
+/**
+ * Populates the manual entry form with parsed recipe data.
+ * @param {Object} data - The parsed recipe data.
+ */
+function populateManualForm(data) {
+    document.getElementById('itemName').value = data.itemName || '';
+    document.getElementById('categories').value = (data.categories || []).join(', ');
+    document.getElementById('description').value = data.description || '';
+    document.getElementById('ingredients').value = (data.ingredients || []).join('\n');
+    document.getElementById('instructions').value = (data.instructions || []).join('\n');
+    
+    // Add notes section content if available (like nutrition facts)
+    const notesTextarea = document.getElementById('notes');
+    if (notesTextarea && data.notes) {
+        notesTextarea.value = data.notes;
     }
 }
 
@@ -223,5 +476,71 @@ export function hideLoading() {
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
         overlay.classList.add('hidden');
+    }
+}
+
+/**
+ * Open the edit recipe modal and populate it with the recipe data
+ * @param {Object} recipe - Recipe data to populate the modal
+ */
+export function openEditModal(recipe) {
+    const modal = document.getElementById('edit-recipe-modal');
+    if (!modal) return;
+
+    // Populate modal fields (adjust IDs as needed)
+    document.getElementById('editItemName').value = recipe.itemName || '';
+    document.getElementById('editCategories').value = (recipe.categories || []).join(', ');
+    document.getElementById('editDescription').value = recipe.description || '';
+    document.getElementById('editIngredients').value = (recipe.ingredients || []).join('\n');
+    document.getElementById('editInstructions').value = (recipe.instructions || []).join('\n');
+    document.getElementById('editNotes').value = recipe.notes || '';
+    
+    // Store the ID of the recipe being edited
+    editingRecipeId = recipe.id;
+
+    // Show the modal (remove hidden class)
+    modal.classList.remove('hidden');
+    // For mobile: scroll modal into view
+    setTimeout(() => {
+        modal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+    // Optionally, focus the first input for better mobile UX
+    document.getElementById('editItemName').focus();
+}
+
+/**
+ * Handles updating a recipe from the edit modal.
+ */
+async function handleUpdateRecipe() {
+    if (!editingRecipeId) {
+        displayErrorMessage('No recipe selected for editing.');
+        return;
+    }
+
+    const updatedData = {
+        itemName: document.getElementById('editItemName').value,
+        categories: document.getElementById('editCategories').value.split(',').map(s => s.trim()).filter(Boolean),
+        description: document.getElementById('editDescription').value,
+        ingredients: document.getElementById('editIngredients').value.split('\n').map(s => s.trim()).filter(Boolean),
+        instructions: document.getElementById('editInstructions').value.split('\n').map(s => s.trim()).filter(Boolean),
+        notes: document.getElementById('editNotes').value
+    };
+
+    // Basic validation
+    if (!updatedData.itemName || updatedData.ingredients.length === 0 || updatedData.instructions.length === 0) {
+        displayErrorMessage('Recipe Name, Ingredients, and Instructions are required.');
+        return;
+    }
+
+    try {
+        showLoading('Updating recipe...');
+        await updateRecipe(editingRecipeId, updatedData);
+        document.getElementById('edit-recipe-modal').classList.add('hidden');
+        editingRecipeId = null; // Reset after update
+    } catch (error) {
+        console.error('Error updating recipe:', error);
+        // Error message is already displayed by updateRecipe
+    } finally {
+        hideLoading();
     }
 }

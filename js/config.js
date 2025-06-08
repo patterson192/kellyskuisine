@@ -1,18 +1,16 @@
-// Load environment variables
-const env = import.meta.env;
-
 // Firebase configuration
-export const firebaseConfig = {
-    apiKey: env.FIREBASE_API_KEY,
-    authDomain: env.FIREBASE_AUTH_DOMAIN,
-    projectId: env.FIREBASE_PROJECT_ID,
-    storageBucket: env.FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: env.FIREBASE_MESSAGING_SENDER_ID,
-    appId: env.FIREBASE_APP_ID
+const firebaseConfig = {
+    apiKey: "AIzaSyAX1F4gzD0-nsAbj7yhSaJZxcwvWNRVFus",
+    authDomain: "kelly-s-kuisine.firebaseapp.com",
+    projectId: "kelly-s-kuisine",
+    storageBucket: "kelly-s-kuisine.firebasestorage.app",
+    messagingSenderId: "974729459966",
+    appId: "1:974729459966:web:42bad27bd106242bfc0daf",
+    measurementId: "G-CGY3C6F1Q2"
 };
 
 // Application ID
-export const appId = env.VITE_APP_ID || 'default-recipe-app';
+const appId = "1:974729459966:web:42bad27bd106242bfc0daf";
 
 // Firebase collection paths
 export const COLLECTIONS = {
@@ -54,3 +52,6 @@ export const VALIDATION_RULES = {
         maxLength: APP_CONSTANTS.MAX_NOTES_LENGTH
     }
 };
+
+// Export the Firebase configuration
+export { firebaseConfig, appId };

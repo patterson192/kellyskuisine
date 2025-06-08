@@ -1,7 +1,8 @@
-import { getFirestore, doc, addDoc, setDoc, deleteDoc, onSnapshot, collection, query, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+import { getFirestore, doc, addDoc, setDoc, deleteDoc, onSnapshot, collection, query, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 import { getCurrentUserId } from './auth.js'; // Still needed for consistency, though user is mocked
-import { APP_CONSTANTS } from './config.js'; // May still use constants
+import { APP_CONSTANTS, COLLECTIONS } from './config.js'; // Import COLLECTIONS as well
 import { displayErrorMessage, displaySuccessMessage, openEditModal } from './ui.js'; // Assuming openEditModal exists in ui.js
+import { app } from './auth.js'; // Import the Firebase app instance
 
 // Local storage key
 const RECIPES_STORAGE_KEY = 'user_recipes';
@@ -27,27 +28,72 @@ export async function initializeRecipes() {
  * Set up real-time listener for recipes
  */
 function setupRecipesListener() {
-    const db = getFirestore();
+    const db = getFirestore(app);
     const userId = getCurrentUserId();
-    const recipesRef = collection(db, `users/${userId}/${COLLECTIONS.RECIPES}`);
+    console.log('[Recipes] Setting up listener for user:', userId);
+    
+    if (!userId) {
+        console.error('[Recipes] No user ID available, cannot set up recipes listener');
+        displayErrorMessage('User authentication required to load recipes');
+        return;
+    }
+    
+    const recipesRef = collection(db, "users", userId, COLLECTIONS.RECIPES);
     const q = query(recipesRef);
+    console.log('[Recipes] Firestore collection path:', `users/${userId}/${COLLECTIONS.RECIPES}`);
+    console.log('[Recipes] Full collection reference:', recipesRef);
 
     // Unsubscribe from previous listener if exists
     if (unsubscribeRecipes) {
+        console.log('[Recipes] Unsubscribing from previous listener');
         unsubscribeRecipes();
     }
 
+    console.log('[Recipes] Starting Firestore listener...');
     unsubscribeRecipes = onSnapshot(q, (snapshot) => {
+        console.log(`[Recipes] ✅ Snapshot received successfully!`);
+        console.log(`[Recipes] Empty: ${snapshot.empty}, Size: ${snapshot.size}`);
+        console.log(`[Recipes] Snapshot metadata:`, snapshot.metadata);
+        
         recipes = [];
         snapshot.forEach((doc) => {
-            recipes.push({ id: doc.id, ...doc.data() });
+            const recipeData = { id: doc.id, ...doc.data() };
+            console.log('[Recipes] Processing recipe document:', {
+                id: doc.id,
+                data: doc.data(),
+                fullRecipe: recipeData
+            });
+            recipes.push(recipeData);
         });
-        recipes.sort((a, b) => a.itemName.localeCompare(b.itemName));
+        
+        console.log('[Recipes] Final processed recipes array:', recipes);
+        console.log('[Recipes] Number of recipes loaded:', recipes.length);
+        
+        recipes.sort((a, b) => (a.itemName || '').localeCompare(b.itemName || ''));
+        
+        console.log('[Recipes] Calling displayRecipes...');
         displayRecipes();
+        console.log('[Recipes] displayRecipes completed');
+        
     }, (error) => {
-        console.error('Error loading recipes:', error);
-        displayErrorMessage('Failed to load recipes. Please check your connection.');
+        console.error('[Recipes] ❌ Error in Firestore listener:', error);
+        console.error('[Recipes] Error details:', {
+            code: error.code,
+            message: error.message,
+            stack: error.stack
+        });
+        
+        // More specific error messages
+        if (error.code === 'permission-denied') {
+            displayErrorMessage('Permission denied: Please check your Firestore security rules');
+        } else if (error.code === 'unavailable') {
+            displayErrorMessage('Database unavailable: Please check your internet connection');
+        } else {
+            displayErrorMessage(`Failed to load recipes: ${error.message}`);
+        }
     });
+    
+    console.log('[Recipes] Listener setup completed, unsubscribe function:', unsubscribeRecipes);
 }
 
 /**
@@ -88,16 +134,51 @@ function filterAndDisplayRecipes(searchTerm, filterCategory) {
  * @param {Array} recipesToDisplay - Recipes to display (optional, defaults to all recipes)
  */
 function displayRecipes(recipesToDisplay = recipes) {
+    console.log('[Recipes] 🎯 displayRecipes called');
+    console.log('[Recipes] Recipes to display:', recipesToDisplay);
+    console.log('[Recipes] Number of recipes to display:', recipesToDisplay.length);
+    
     const container = document.getElementById('recipe-container');
-    if (!container) return;
-
-    container.innerHTML = recipesToDisplay.length === 0 ?
-        '<p class="text-center text-gray-500 col-span-full">No recipes found. Try adjusting your search or add a new recipe.</p>' : '';
-
-    recipesToDisplay.forEach(recipe => {
-        const card = createRecipeCard(recipe);
-        container.appendChild(card);
+    if (!container) {
+        console.error('[Recipes] ❌ Recipe container element not found!');
+        console.error('[Recipes] Available elements with "recipe" in ID:', 
+            Array.from(document.querySelectorAll('[id*="recipe"]')).map(el => el.id));
+        return;
+    }
+    
+    console.log('[Recipes] ✅ Recipe container found:', container);
+    console.log('[Recipes] Container styles:', {
+        display: window.getComputedStyle(container).display,
+        height: window.getComputedStyle(container).height,
+        width: window.getComputedStyle(container).width,
+        visibility: window.getComputedStyle(container).visibility,
+        position: window.getComputedStyle(container).position
     });
+    console.log('[Recipes] Container current content length:', container.innerHTML.length);
+
+    if (recipesToDisplay.length === 0) {
+        const message = '<p class="text-center text-gray-500 col-span-full">No recipes found. Try adjusting your search or add a new recipe.</p>';
+        container.innerHTML = message;
+        console.log('[Recipes] 📝 Displayed "no recipes" message');
+    } else {
+        container.innerHTML = ''; // Clear existing content
+        console.log('[Recipes] 🧹 Cleared container, adding recipe cards...');
+        
+        recipesToDisplay.forEach((recipe, index) => {
+            console.log(`[Recipes] Creating card ${index + 1}/${recipesToDisplay.length} for recipe:`, recipe.itemName);
+            try {
+                const card = createRecipeCard(recipe);
+                container.appendChild(card);
+                console.log(`[Recipes] ✅ Card ${index + 1} added successfully`);
+            } catch (error) {
+                console.error(`[Recipes] ❌ Error creating card ${index + 1}:`, error);
+            }
+        });
+        
+        console.log('[Recipes] 🎉 All recipe cards added to container');
+    }
+    
+    console.log('[Recipes] Final container content length:', container.innerHTML.length);
 }
 
 /**
@@ -107,126 +188,186 @@ function displayRecipes(recipesToDisplay = recipes) {
  */
 function createRecipeCard(recipe) {
     const card = document.createElement('div');
-    card.className = 'bg-white rounded-xl shadow-lg overflow-hidden recipe-card';
-    // Ensure all fields are checked for existence before trying to access them
+    card.className = 'bg-white rounded-xl shadow-lg overflow-hidden recipe-card flex flex-col justify-between min-h-[300px] w-full';
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'p-6';
+
     const itemName = recipe.itemName || 'Unnamed Recipe';
     const categories = recipe.categories || [];
-    const description = recipe.description || 'No description provided.';
+    const description = recipe.description || '';
     const ingredients = recipe.ingredients || [];
     const instructions = recipe.instructions || [];
     const notes = recipe.notes || '';
 
-    card.innerHTML = `
-        <div class="p-6">
-            <h3 class="text-2xl font-playfair text-amber-700 mb-3">${itemName}</h3>
-            ${categories.length > 0 ? `<p class="text-xs text-amber-500 mb-2">Categories: ${categories.join(', ')}</p>` : ''}
-            <p class="text-gray-600 text-sm mb-4">${description}</p>
-            
-            ${ingredients.length > 0 ? `
-            <div class="mt-4">
-                <h4 class="font-semibold text-amber-600">Ingredients:</h4>
-                <ul class="list-disc list-inside text-gray-700 text-sm mt-2">
-                    ${ingredients.map(ing => `<li>${ing}</li>`).join('')}
-                </ul>
-            </div>` : ''}
+    // Title
+    const title = document.createElement('h3');
+    title.className = 'text-2xl font-playfair text-amber-700 mb-3';
+    title.textContent = itemName;
+    contentDiv.appendChild(title);
 
-            ${instructions.length > 0 ? `
-            <div class="mt-4">
-                <h4 class="font-semibold text-amber-600">Instructions:</h4>
-                <ol class="list-decimal list-inside text-gray-700 text-sm mt-2">
-                    ${instructions.map(inst => `<li>${inst}</li>`).join('')}
-                </ol>
-            </div>` : ''}
+    // Categories
+    if (categories.length > 0) {
+        const p = document.createElement('p');
+        p.className = 'text-xs text-amber-500 mb-2';
+        p.textContent = `Categories: ${categories.join(', ')}`;
+        contentDiv.appendChild(p);
+    }
+    
+    // Description
+    if (description) {
+        const p = document.createElement('p');
+        p.className = 'text-gray-600 text-sm mb-4';
+        p.textContent = description;
+        contentDiv.appendChild(p);
+    }
 
-            ${notes ? `
-                <div class="mt-4">
-                    <h4 class="font-semibold text-amber-600">Notes:</h4>
-                    <p class="text-gray-600 italic text-sm mt-2">${notes}</p>
-                </div>
-            ` : ''}
+    // A helper function to create sections
+    const createSection = (titleText, items, isOrdered) => {
+        if (items.length === 0) return;
+        const div = document.createElement('div');
+        div.className = 'mt-4';
+        const h4 = document.createElement('h4');
+        h4.className = 'font-semibold text-amber-600';
+        h4.textContent = titleText;
+        div.appendChild(h4);
+        const list = document.createElement(isOrdered ? 'ol' : 'ul');
+        list.className = `${isOrdered ? 'list-decimal' : 'list-disc'} list-inside text-gray-700 text-sm mt-2`;
+        items.forEach(itemText => {
+            const li = document.createElement('li');
+            li.textContent = itemText;
+            list.appendChild(li);
+        });
+        div.appendChild(list);
+        contentDiv.appendChild(div);
+    };
 
-            <div class="mt-6 flex justify-end space-x-2">
-                <button class="edit-recipe px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-                        data-recipe-id="${recipe.id}">Edit</button>
-                <button class="delete-recipe px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
-                        data-recipe-id="${recipe.id}">Delete</button>
-            </div>
-        </div>
-    `;
+    createSection('Ingredients:', ingredients, false);
+    createSection('Instructions:', instructions, true);
 
-    // Add event listeners
-    card.querySelector('.edit-recipe').addEventListener('click', () => handleEditRecipe(recipe.id));
-    card.querySelector('.delete-recipe').addEventListener('click', () => handleDeleteRecipe(recipe.id));
+    // Notes
+    if (notes) {
+        const notesDiv = document.createElement('div');
+        notesDiv.className = 'mt-4';
+        const notesTitle = document.createElement('h4');
+        notesTitle.className = 'font-semibold text-amber-600';
+        notesTitle.textContent = 'Notes:';
+        notesDiv.appendChild(notesTitle);
+        const notesP = document.createElement('p');
+        notesP.className = 'text-gray-600 italic text-sm mt-2';
+        notesP.textContent = notes;
+        notesDiv.appendChild(notesP);
+        contentDiv.appendChild(notesDiv);
+    }
+    
+    card.appendChild(contentDiv);
+
+    // Button container
+    const buttonDiv = document.createElement('div');
+    buttonDiv.className = 'p-6 pt-0 flex justify-end space-x-2';
+
+    const editButton = document.createElement('button');
+    editButton.className = 'edit-recipe px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm';
+    editButton.textContent = 'Edit';
+    editButton.dataset.recipeId = recipe.id;
+    editButton.addEventListener('click', () => handleEditRecipe(recipe.id));
+
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'delete-recipe px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-sm';
+    deleteButton.textContent = 'Delete';
+    deleteButton.dataset.recipeId = recipe.id;
+    deleteButton.addEventListener('click', () => deleteRecipe(recipe.id));
+
+    buttonDiv.appendChild(editButton);
+    buttonDiv.appendChild(deleteButton);
+    card.appendChild(buttonDiv);
 
     return card;
 }
 
 /**
- * Add a new recipe to local storage
- * @param {Object} recipeData - Recipe data
+ * Add a new recipe to Firestore
+ * @param {Object} recipeData - The recipe data to add.
  */
 export async function addRecipe(recipeData) {
     try {
+        console.log('Starting to add recipe:', recipeData);
+        const db = getFirestore(app);
+        const userId = getCurrentUserId();
+        console.log('Current user ID:', userId);
+        
+        if (!userId) throw new Error('User not authenticated for adding recipe.');
+        
+        const recipesRef = collection(db, 'users', userId, 'recipes');
+        console.log('Firestore collection path:', `users/${userId}/recipes`);
+        
         const newRecipe = {
             ...recipeData,
-            id: Date.now().toString(), // Simple unique ID
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
         };
-        recipes.push(newRecipe);
-        recipes.sort((a, b) => (a.itemName || '').localeCompare(b.itemName || ''));
-        saveRecipesToLocalStorage();
-        displayRecipes();
+        
+        console.log('Attempting to save recipe to Firestore...');
+        const docRef = await addDoc(recipesRef, newRecipe);
+        console.log('Recipe saved successfully with ID:', docRef.id);
         displaySuccessMessage('Recipe added successfully!');
     } catch (error) {
-        console.error('Error adding recipe:', error);
-        displayErrorMessage('Failed to add recipe.');
-        // No need to throw error, just display message
+        console.error('Error adding recipe to Firestore:', error);
+        console.error('Error details:', {
+            code: error.code,
+            message: error.message,
+            stack: error.stack
+        });
+        displayErrorMessage(`Failed to add recipe: ${error.message}`);
+        throw error;
     }
 }
 
 /**
- * Update an existing recipe in local storage
- * @param {string} recipeId - Recipe ID
- * @param {Object} recipeData - Updated recipe data
+ * Update an existing recipe in Firestore
+ * @param {string} recipeId - The ID of the recipe to update.
+ * @param {Object} recipeData - The updated recipe data.
  */
 export async function updateRecipe(recipeId, recipeData) {
     try {
-        const recipeIndex = recipes.findIndex(r => r.id === recipeId);
-        if (recipeIndex === -1) {
-            throw new Error('Recipe not found for update');
-        }
-        recipes[recipeIndex] = {
-            ...recipes[recipeIndex], // Keep existing fields like id, createdAt
+        const db = getFirestore(app);
+        const userId = getCurrentUserId();
+        if (!userId) throw new Error('User not authenticated for updating recipe.');
+        
+        const recipeRef = doc(db, 'users', userId, 'recipes', recipeId);
+        const updatedData = {
             ...recipeData,
-            updatedAt: new Date().toISOString()
+            updatedAt: serverTimestamp()
         };
-        recipes.sort((a, b) => (a.itemName || '').localeCompare(b.itemName || ''));
-        saveRecipesToLocalStorage();
-        displayRecipes();
+        
+        await setDoc(recipeRef, updatedData, { merge: true });
         displaySuccessMessage('Recipe updated successfully!');
     } catch (error) {
-        console.error('Error updating recipe:', error);
+        console.error('Error updating recipe in Firestore:', error);
         displayErrorMessage('Failed to update recipe.');
+        throw error;
     }
 }
 
 /**
- * Delete a recipe from local storage
- * @param {string} recipeId - Recipe ID
+ * Delete a recipe from Firestore
+ * @param {string} recipeId - The ID of the recipe to delete.
  */
-async function handleDeleteRecipe(recipeId) {
+export async function deleteRecipe(recipeId) {
     try {
-        // Optional: Add a confirmation dialog here
-        // if (!confirm('Are you sure you want to delete this recipe?')) return;
+        if (!confirm('Are you sure you want to delete this recipe?')) return;
 
-        recipes = recipes.filter(r => r.id !== recipeId);
-        saveRecipesToLocalStorage();
-        displayRecipes();
+        const db = getFirestore(app);
+        const userId = getCurrentUserId();
+        if (!userId) throw new Error('User not authenticated for deleting recipe.');
+        
+        const recipeRef = doc(db, 'users', userId, 'recipes', recipeId);
+        await deleteDoc(recipeRef);
         displaySuccessMessage('Recipe deleted successfully!');
     } catch (error) {
-        console.error('Error deleting recipe:', error);
+        console.error('Error deleting recipe from Firestore:', error);
         displayErrorMessage('Failed to delete recipe.');
+        throw error;
     }
 }
 
