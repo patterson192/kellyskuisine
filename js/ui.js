@@ -274,6 +274,83 @@ function parseRecipeText(text) {
     let lastInstruction = '';
     let inInstructions = false;
 
+    // Patterns to skip as non-title lines (site names, watermarks, etc.)
+    const nonTitlePatterns = [
+        /allrecipes/i,
+        /alecipes/i,
+        /food\.com/i,
+        /epicurious/i,
+        /tasty/i,
+        /yummly/i,
+        /test kitchen/i,
+        /submitted by/i,
+        /tested by/i,
+        /recipe hub/i,
+        /recipe of the day/i,
+        /recipe(s)?!/i,
+        /\bservings?\b/i,
+        /\bminutes?\b/i,
+        /\bcook time\b/i,
+        /\bprep time\b/i,
+        /\btotal time\b/i
+    ];
+
+    // Helper: Normalize unicode fractions to ASCII
+    function normalizeFractions(str) {
+        return str
+            .replace(/½/g, '1/2')
+            .replace(/⅓/g, '1/3')
+            .replace(/⅔/g, '2/3')
+            .replace(/¼/g, '1/4')
+            .replace(/¾/g, '3/4')
+            .replace(/⅕/g, '1/5')
+            .replace(/⅖/g, '2/5')
+            .replace(/⅗/g, '3/5')
+            .replace(/⅘/g, '4/5')
+            .replace(/⅙/g, '1/6')
+            .replace(/⅚/g, '5/6')
+            .replace(/⅛/g, '1/8')
+            .replace(/⅜/g, '3/8')
+            .replace(/⅝/g, '5/8')
+            .replace(/⅞/g, '7/8')
+            // Fix Tesseract OCR error: replace % with 1/2
+            .replace(/(^|\s)%(?=\s|$)/g, '$11/2') // Standalone %
+            .replace(/%/g, '1/2') // Any remaining %
+            // Separate numbers and words stuck together (e.g., 1lemon -> 1 lemon)
+            .replace(/(\d)([a-zA-Z])/g, '$1 $2')
+            // Split common run-together English word pairs from OCR (case-insensitive)
+            .replace(/\b[Ii]nafood\b/g, 'In a food')
+            .replace(/\b[Ii]nthe\b/g, 'in the')
+            .replace(/\b[Ii]ntoa\b/g, 'into a')
+            .replace(/\b[Ii]ntothe\b/g, 'into the')
+            .replace(/\b[Ii]n([aA])([A-Za-z]+)/g, 'In a $2') // e.g., Inapple → In a pple
+            .replace(/\b([Oo]f|[Tt]o|[Oo]n|[Aa]t|[Bb]y|[Aa]n|[Aa])([A-Z][a-z]+)/g, '$1 $2') // e.g., Ontable → On table
+            // General: split a short word (1-2 letters) from a following word if run together
+            .replace(/\b([a-zA-Z]{1,2})([A-Z][a-z]+)/g, '$1 $2')
+            // Aggressively split run-together words from OCR
+            .replace(/([a-z])([A-Z])/g, '$1 $2') // e.g., 'Inafood' -> 'In a food'
+            .replace(/([a-z])([ai])([a-z]+)/g, '$1 $2$3')
+            // Fix common split ingredient words from OCR
+            .replace(/t\s*a\s*s\s*p\s*o\s*o\s*n/gi, 'teaspoon')
+            .replace(/t\s*b\s*s\s*p\s*o\s*o\s*n/gi, 'tablespoon')
+            .replace(/b\s*a\s*k\s*i\s*n\s*g/gi, 'baking')
+            .replace(/m\s*i\s*l\s*k/gi, 'milk')
+            .replace(/a\s*a\s*l\s*l-?p\s*u\s*r\s*p\s*o\s*s\s*e/gi, 'all-purpose')
+            .replace(/s\s*u\s*g\s*a\s*r/gi, 'sugar')
+            .replace(/b\s*u\s*t\s*t\s*e\s*r/gi, 'butter')
+            .replace(/e\s*g\s*g/gi, 'egg')
+            .replace(/l\s*a\s*r\s*g\s*e/gi, 'large')
+            .replace(/f\s*l\s*o\s*u\s*r/gi, 'flour')
+            .replace(/p\s*o\s*w\s*d\s*e\s*r/gi, 'powder')
+            .replace(/s\s*a\s*l\s*t/gi, 'salt')
+            .replace(/m\s*e\s*l\s*t/gi, 'melt')
+            .replace(/w\s*h\s*i\s*t\s*e/gi, 'white')
+            .replace(/a\s*r\s*g\s*e\s*e\s*g\s*g/gi, 'large egg')
+            .replace(/a\s*r\s*g\s*e\s*g\s*g/gi, 'large egg')
+            .replace(/l\s*a\s*r\s*g\s*e\s*e\s*g\s*g/gi, 'large egg')
+            .replace(/\s{2,}/g, ' '); // Remove extra spaces
+    }
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lowerLine = line.toLowerCase();
@@ -304,8 +381,13 @@ function parseRecipeText(text) {
         if (currentSection === 'header') {
             // First substantial line is usually the recipe title
             if (!foundTitle && line.length > 3) {
-                recipe.itemName = line.replace(/^(recipe|dish):\s*/i, '').trim();
-                foundTitle = true;
+                // Skip lines that match non-title patterns or are only 1 word
+                const isNonTitle = nonTitlePatterns.some((pat) => pat.test(line));
+                const wordCount = line.split(/\s+/).length;
+                if (!isNonTitle && wordCount > 1) {
+                    recipe.itemName = line.replace(/^(recipe|dish):\s*/i, '').trim();
+                    foundTitle = true;
+                }
             } else if (foundTitle) {
                 // Collect description and metadata
                 if (keywords.timing.some(kw => lowerLine.includes(kw)) || 
@@ -331,7 +413,8 @@ function parseRecipeText(text) {
                     .replace(/^\d+\.\s*/, '') // Remove numbering
                     .replace(/^Step\s*\d+[:\s]*/i, '') // Remove step indicators
                     .trim();
-                
+                // Normalize unicode fractions to ASCII
+                cleanedLine = normalizeFractions(cleanedLine);
                 if (cleanedLine && cleanedLine.length > 1) {
                     recipe.ingredients.push(cleanedLine);
                 }
