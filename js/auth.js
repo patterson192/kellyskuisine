@@ -91,7 +91,7 @@ async function handleAuthStateChange(user) {
     } else {
         console.log('User is signed out');
         userId = null;
-        await signInUser();
+        // Don't automatically sign in - let the login form handle authentication
         }
     } catch (error) {
         console.error('Error in auth state change:', error);
@@ -109,8 +109,8 @@ async function signInUser() {
             await signInWithCustomToken(auth, __initial_auth_token);
             console.log('Signed in with custom token');
         } else {
-            await signInAnonymously(auth);
-            console.log('Signed in anonymously');
+            // Don't sign in anonymously - let the login form handle authentication
+            console.log('No automatic sign-in - user must log in through the form');
         }
     } catch (error) {
         console.error('Error during sign-in:', error);
