@@ -1,9 +1,9 @@
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
 
-// Get the existing auth instance (don't initialize Firebase again)
-const auth = getAuth();
-
-window.addEventListener('DOMContentLoaded', () => {
+// Wait for Firebase to be initialized before setting up login
+window.addEventListener('firebaseInitialized', () => {
+  const auth = getAuth();
+  
   const loginSection = document.getElementById('login-section');
   const loginForm = document.getElementById('login-form');
   const loginError = document.getElementById('login-error');

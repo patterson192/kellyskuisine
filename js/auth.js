@@ -61,6 +61,9 @@ export async function initializeAuth(firebaseConfig, appId) {
 
         // Don't attempt any automatic sign in - let the login form handle it
         console.log('Firebase initialization completed successfully');
+        
+        // Dispatch event to notify other modules that Firebase is ready
+        window.dispatchEvent(new CustomEvent('firebaseInitialized'));
 
     } catch (error) {
         console.error('Error initializing Firebase:', error);
