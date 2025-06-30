@@ -1,14 +1,6 @@
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-import { firebaseConfig } from './config.js';
 
-// Initialize Firebase app if not already initialized
-let app;
-try {
-  app = initializeApp(firebaseConfig);
-} catch (e) {
-  // Already initialized
-}
+// Get the existing auth instance (don't initialize Firebase again)
 const auth = getAuth();
 
 window.addEventListener('DOMContentLoaded', () => {
