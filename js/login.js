@@ -1,4 +1,4 @@
-import { getAuth, signInWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
 import { firebaseConfig } from './config.js';
 
@@ -17,11 +17,22 @@ window.addEventListener('DOMContentLoaded', () => {
   const loginError = document.getElementById('login-error');
   const mainContent = document.querySelector('.container');
 
-  // Show login form, hide main content
-  if (loginSection && mainContent) {
-    loginSection.classList.remove('hidden');
-    mainContent.classList.add('hidden');
-  }
+  // Check authentication state on page load
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      // User is signed in, show main content
+      if (loginSection && mainContent) {
+        loginSection.classList.add('hidden');
+        mainContent.classList.remove('hidden');
+      }
+    } else {
+      // User is signed out, show login form
+      if (loginSection && mainContent) {
+        loginSection.classList.remove('hidden');
+        mainContent.classList.add('hidden');
+      }
+    }
+  });
 
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
@@ -31,11 +42,7 @@ window.addEventListener('DOMContentLoaded', () => {
       loginError.classList.add('hidden');
       try {
         await signInWithEmailAndPassword(auth, email, password);
-        // On success, hide login, show main content
-        if (loginSection && mainContent) {
-          loginSection.classList.add('hidden');
-          mainContent.classList.remove('hidden');
-        }
+        // The onAuthStateChanged listener will handle showing/hiding content
       } catch (err) {
         loginError.textContent = 'Login failed. Please check your credentials.';
         loginError.classList.remove('hidden');
