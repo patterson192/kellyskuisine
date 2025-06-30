@@ -59,8 +59,7 @@ export async function initializeAuth(firebaseConfig, appId) {
         // Set up authentication state observer
         onAuthStateChanged(auth, handleAuthStateChange);
 
-        // Attempt initial sign in
-        await signInUser();
+        // Don't attempt any automatic sign in - let the login form handle it
         console.log('Firebase initialization completed successfully');
 
     } catch (error) {

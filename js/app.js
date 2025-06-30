@@ -18,10 +18,8 @@ async function initializeApp() {
         initializeUI();
         console.log('UI components initialized successfully');
         
-        // Load and display recipes
-        console.log('Initializing recipes...');
-        await initializeRecipes();
-        console.log('Recipes initialized successfully');
+        // Don't initialize recipes here - wait for user authentication
+        console.log('Waiting for user authentication before initializing recipes...');
         
         console.log('Application initialized successfully');
     } catch (error) {
@@ -30,6 +28,18 @@ async function initializeApp() {
         displayGlobalError(`Failed to initialize the application: ${errorMessage}. Please refresh the page.`);
     }
 }
+
+// Listen for user authentication events
+window.addEventListener('userAuthenticated', async (event) => {
+    try {
+        console.log('User authenticated, initializing recipes...');
+        await initializeRecipes();
+        console.log('Recipes initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize recipes:', error);
+        displayGlobalError(`Failed to load recipes: ${error.message}`);
+    }
+});
 
 // Global error handler
 window.onerror = function(message, source, lineno, colno, error) {
